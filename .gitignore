@@ -1,0 +1,28 @@
+cam run 2.txt
+cam run 3.txt
+cam run 4.txt
+cam run 5.txt
+cam run quickselect 2.txt
+cam run quickselect 3.txt
+cam run quickselect 4.txt
+cam run quickselect 5.txt
+cam run quickselect.txt
+cam test output dataset run 1.txt
+cam test output dataset.txt
+cam_run_baseline_1.txt
+cam_run_baseline_2.txt
+cam_run_baseline_3.txt
+cam_run_baseline_4.txt
+cam_run_baseline_5.txt
+charts/bar_n100.png
+charts/bar_n1000.png
+charts/bar_n5000.png
+charts/bar_n10000.png
+charts/bar_n50000.png
+charts/bar_n100000.png
+charts/line_all_configs_quickselect.png
+charts/line_all_configs_random_vs_sort.png
+charts/line_duplicates.png
+charts/line_random.png
+charts/line_reverse.png
+charts/line_sorted.png

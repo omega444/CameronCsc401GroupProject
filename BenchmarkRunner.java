@@ -18,7 +18,7 @@ public class BenchmarkRunner {
     // Johnny (Baseline Lead): Set runQuickselect = false
     // Jacob (Improved Lead): Set runBaseline = false
     public static boolean runBaseline = false; 
-    public static boolean runQuickselect = false;
+    public static boolean runQuickselect = true;
 
     public static void main(String[] args) {
 
