@@ -3,7 +3,7 @@ import java.util.Random;
 /**
  * QuickSelect.java
  * Implementation of the K-th Smallest Element algorithm using 
- * Randomized Lomuto Partitioning as specified in the project requirements.
+ * Randomized Lomuto Partitioning.
  */
 public class QuickSelect {
     private static final Random random = new Random();
