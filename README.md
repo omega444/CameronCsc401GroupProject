@@ -1,19 +1,22 @@
 # CSC 401/501 Algorithm Benchmarking Project
 
-A Java benchmarking suite that empirically compares two approaches to the **k-th Smallest Element** problem across a range of dataset sizes and input configurations.
+A Java benchmarking suite that empirically compares sorting and selection algorithms across a range of dataset sizes and input configurations.
 
 ---
 
 ## What It Does
 
-The project pits two algorithms against each other:
+The project benchmarks three algorithms:
 
 | Algorithm | Strategy | Complexity |
 |---|---|---|
 | **Baseline** — `Arrays.sort()` | Sort the entire array, then index into it | O(n log n) |
 | **QuickSelect (Lomuto)** | Randomized Lomuto partitioning; stop as soon as the pivot lands on position k | Expected O(n) |
+| **YaroslavskiySort** | Pure dual-pivot quicksort (Yaroslavskiy 2009) — partitions into three zones using two pivots, recurses on all three | Expected O(n log n) |
 
-Both are run across **6 dataset sizes** (`100`, `1,000`, `5,000`, `10,000`, `50,000`, `100,000`) and **4 input configurations**, with **100 timed trials per combination**. Average nanosecond times are recorded to CSV-formatted `.txt` files, which are then fed into a chart generator that produces bar charts and line charts as PNG images.
+YaroslavskiySort was added to isolate the dual-pivot partitioning strategy from Java's production `Arrays.sort()` heuristics (which layer on insertion sort fallbacks, Timsort intercepts, and pivot sampling). Running the pure algorithm on the same datasets reveals how much of `Arrays.sort()`'s performance comes from the dual-pivot scheme itself versus those engineering additions.
+
+All algorithms are run across **6 dataset sizes** (`100`, `1,000`, `5,000`, `10,000`, `50,000`, `100,000`) and **4 input configurations**, with **100 timed trials per combination**. Average nanosecond times are recorded to CSV-formatted `.txt` files, which are then fed into a chart generator that produces bar charts and line charts as PNG images.
 
 ### Input Configurations
 
@@ -32,6 +35,7 @@ Both are run across **6 dataset sizes** (`100`, `1,000`, `5,000`, `10,000`, `50,
 .
 ├── DataGenerator.java          # Generates test arrays in the 4 configurations
 ├── QuickSelect.java            # Randomized Lomuto k-th smallest selection
+├── YaroslavskiySort.java       # Pure Yaroslavskiy 2009 dual-pivot quicksort (no JDK heuristics)
 ├── BenchmarkRunner.java        # Runs benchmarks and prints CSV results to stdout
 ├── BenchmarkChartGenerator.java# Reads run files, averages across runs, renders PNGs
 │
@@ -147,9 +151,41 @@ DatasetSize,Configuration,Algorithm,AvgTimeNanoseconds
 
 Random pivot selection gives **expected O(n)** time and eliminates worst-case O(n²) behaviour on sorted/reverse-sorted input.
 
+### YaroslavskiySort — Dual-Pivot Quicksort (Yaroslavskiy 2009)
+
+`YaroslavskiySort.sort(int[] a)` sorts in-place using the original dual-pivot scheme from Vladimir Yaroslavskiy's 2009 proposal:
+
+1. Choose `p1 = a[left]`, `p2 = a[right]`; swap if necessary so `p1 ≤ p2`.
+2. Three-pointer sweep (`less`, `k`, `great`) divides the array into four zones: `< p1`, `[p1..p2]`, `> p2`, and unexamined.
+3. Place both pivots in their final positions, then recurse on the left zone, centre zone (skipped when `p1 == p2`), and right zone.
+
+The implementation uses an **explicit heap-allocated stack** instead of the JVM call stack, preventing `StackOverflowError` on degenerate inputs (sorted, reverse-sorted, all-equal). The partitioning logic itself is unchanged from the 2009 paper.
+
+**Why add it?** Java's `Arrays.sort()` is derived from this algorithm but wraps it in production heuristics (insertion sort below a threshold, Timsort for nearly-sorted runs, pivot sampling). YaroslavskiySort strips all of that away so benchmarks reflect the core dual-pivot strategy alone.
+
 ### Baseline — `Arrays.sort()`
 
 The entire copy of the array is sorted with Java's dual-pivot Timsort (`Arrays.sort`). The k-th smallest is then `a[k-1]`. This always costs **O(n log n)** regardless of input shape.
+
+---
+
+## Limitations & Runtime Expectations
+
+| Dataset size (n) | Approximate benchmark time |
+|---|---|
+| 100 – 1,000 | < 5 seconds |
+| 5,000 – 10,000 | 10 – 30 seconds |
+| 50,000 | ~1–2 minutes |
+| 100,000 | ~3–5 minutes |
+
+Times are wall-clock estimates for a full 100-trial run on a modern laptop. Actual times vary by hardware.
+
+**Memory:** Each run loads arrays entirely into heap. At n = 100,000 with `int[]`, a single array uses ~400 KB; 100 trials allocate and discard arrays sequentially, so peak heap usage stays well under the JVM default (typically 256 MB). No special `-Xmx` flag is needed.
+
+**Known limitations:**
+- The benchmark is single-threaded; results reflect one CPU core only.
+- JVM warm-up effects are not fully eliminated. The first few trials of each combination may be slower due to JIT compilation. This is expected and averaged out across 100 trials.
+- Chart generation (`BenchmarkChartGenerator`) requires at least one matching run file per algorithm prefix (`*baseline*` or `*quickselect*`); running with no output files will throw a file-not-found error.
 
 ---
 
