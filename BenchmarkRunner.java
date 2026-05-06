@@ -9,7 +9,7 @@ import java.util.Arrays;
  * 1. Comprehensive Proof-of-Generation: Visual validation of small (n=10) and large (n=1000) arrays.
  * 2. Randomized QuickSelect Proof: Verifies Lomuto Partitioning correctness across configurations.
  * 3. Transparent Timing: Displays real-time nanosecond results for initial runs.
- * 4. Unambiguous Labeling: Explicitly labels Baseline(Arrays.sort) and Quickselect(Lomuto).
+ * 4. Unambiguous Labeling: Explicitly labels Baseline(Arrays.sort+RunDetection) and Quickselect(Lomuto).
  * 5. Toggle Flags: Independent execution for Johnny (Baseline) and Jacob (Improved).
  */
 public class BenchmarkRunner {
@@ -17,8 +17,9 @@ public class BenchmarkRunner {
     // --- TEAM TOGGLE FLAGS ---
     // Johnny (Baseline Lead): Set runQuickselect = false
     // Jacob (Improved Lead): Set runBaseline = false
-    public static boolean runBaseline = false; 
+    public static boolean runBaseline = true; 
     public static boolean runQuickselect = true;
+    public static boolean runYaroslavskiy = true;
 
     public static void main(String[] args) {
 
@@ -38,7 +39,7 @@ public class BenchmarkRunner {
                 long sB = System.nanoTime();
                 Arrays.sort(sampleB);
                 long eB = System.nanoTime();
-                System.out.printf("   -> Baseline(Arrays.sort) Time: %d ns\n", (eB - sB));
+                System.out.printf("   -> Baseline(Arrays.sort+RunDetection) Time: %d ns\n", (eB - sB));
             }
             
             // QuickSelect Proof with Timing
@@ -49,6 +50,16 @@ public class BenchmarkRunner {
                 long eQ = System.nanoTime();
                 System.out.printf("   -> QuickSelect(Lomuto) Proof: Found %dth smallest -> %d (Time: %d ns)\n", 
                                     kValue, result, (eQ - sQ));
+            }
+
+            // Yaroslavskiy Dual-Pivot Quicksort Proof with Timing
+            if (runYaroslavskiy) {
+                int[] sampleY = Arrays.copyOf(proofData, 10);
+                long sY = System.nanoTime();
+                YaroslavskiySort.sort(sampleY);
+                long eY = System.nanoTime();
+                System.out.printf("   -> YAROSLAVSKIY(DualPivot) Proof: Sorted -> %s (Time: %d ns)\n",
+                                    Arrays.toString(sampleY), (eY - sY));
             }
             System.out.println();
         }
@@ -74,7 +85,7 @@ public class BenchmarkRunner {
             int[] largeB = Arrays.copyOf(largeData, largeN);
             Arrays.sort(largeB);
             long endB = System.nanoTime();
-            System.out.println("   -> Large Scale Baseline(Arrays.sort) Proof: Completed in " + (endB - startB) + " ns");
+            System.out.println("   -> Large Scale Baseline(Arrays.sort+RunDetection) Proof: Completed in " + (endB - startB) + " ns");
         }
 
         // Large Scale QuickSelect Proof
@@ -83,6 +94,15 @@ public class BenchmarkRunner {
             int res = QuickSelect.select(Arrays.copyOf(largeData, largeN), 0, largeN - 1, largeN/2);
             long endQ = System.nanoTime();
             System.out.println("   -> Large Scale QuickSelect(Lomuto) Proof: Found median in " + (endQ - startQ) + " ns");
+        }
+
+        // Large Scale Yaroslavskiy Proof
+        if (runYaroslavskiy) {
+            long startY = System.nanoTime();
+            int[] largeY = Arrays.copyOf(largeData, largeN);
+            YaroslavskiySort.sort(largeY);
+            long endY = System.nanoTime();
+            System.out.println("   -> Large Scale YAROSLAVSKIY(DualPivot) Proof: Completed in " + (endY - startY) + " ns");
         }
         System.out.println("================================================\n");
 
@@ -98,6 +118,7 @@ public class BenchmarkRunner {
             for (String config : configs) {
                 long totalBaselineTime = 0;
                 long totalQuickselectTime = 0;
+                long totalYaroslavskiyTime = 0;
 
                 for (int t = 0; t < trials; t++) {
                     int[] data = DataGenerator.generate(n, config);
@@ -116,13 +137,23 @@ public class BenchmarkRunner {
                         QuickSelect.select(quickCopy, 0, n - 1, k);
                         totalQuickselectTime += (System.nanoTime() - start);
                     }
+
+                    if (runYaroslavskiy) {
+                        int[] yaroCopy = Arrays.copyOf(data, data.length);
+                        long start = System.nanoTime();
+                        YaroslavskiySort.sort(yaroCopy);
+                        totalYaroslavskiyTime += (System.nanoTime() - start);
+                    }
                 }
 
                 if (runBaseline) {
-                    System.out.printf("%d,%s,Baseline(Arrays.sort),%d\n", n, config, totalBaselineTime / trials);
+                    System.out.printf("%d,%s,Baseline(Arrays.sort+RunDetection),%d\n", n, config, totalBaselineTime / trials);
                 }
                 if (runQuickselect) {
                     System.out.printf("%d,%s,Quickselect(Lomuto),%d\n", n, config, totalQuickselectTime / trials);
+                }
+                if (runYaroslavskiy) {
+                    System.out.printf("%d,%s,YAROSLAVSKIY(DualPivot),%d\n", n, config, totalYaroslavskiyTime / trials);
                 }
             }
         }

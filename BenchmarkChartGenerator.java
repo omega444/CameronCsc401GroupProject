@@ -3,6 +3,7 @@ import java.awt.*;
 import java.awt.geom.*;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.List;
@@ -11,15 +12,17 @@ import javax.imageio.ImageIO;
 /**
  * BenchmarkChartGenerator
  *
- * Reads QuickSelect (Lomuto) and Baseline (Arrays.sort) benchmark CSV data
- * from multiple run files, averages across runs, and produces:
+ * Reads QuickSelect (Lomuto), Baseline (Arrays.sort+RunDetection), and
+ * YAROSLAVSKIY (DualPivot) benchmark CSV data from multiple run files,
+ * averages across runs, and produces:
  *   1. Bar charts  — avg time per configuration at each dataset size
- *                    Each bar is labelled "QS" or "BL" directly above it
- *   2. Line charts — avg time vs. dataset size per configuration (both algos)
+ *                    Each bar is labelled "QS", "BL", or "YR" directly above it
+ *   2. Line charts — avg time vs. dataset size per configuration (all algos)
  *                    Each line is labelled at its right endpoint
  *
  * Usage:
- *   Place all cam_run_quickselect*.txt and cam_run_baseline*.txt files in
+ *   Place all cam_run_quickselect*.txt, cam_run_baseline*.txt, and
+ *   cam_run_yaroslavskiy*.txt files in
  *   the same directory as this class (or update DATA_DIR below).
  *   Compile:  javac BenchmarkChartGenerator.java
  *   Run:      java BenchmarkChartGenerator
@@ -55,10 +58,18 @@ public class BenchmarkChartGenerator {
         new Color(255, 220, 140),   // REVERSE
         new Color(255, 170, 185),   // DUPLICATES
     };
+    // Yaroslavskiy bars: vivid violet per config
+    private static final Color[] YR_COLORS = {
+        new Color(180, 100, 255),   // RANDOM     – vivid violet
+        new Color(220, 150, 255),   // SORTED     – light violet
+        new Color(130,  50, 220),   // REVERSE    – deep violet
+        new Color(200,  80, 240),   // DUPLICATES – vivid purple
+    };
 
-    // Line chart: QS = electric cyan, BL = gold — unmistakably different
+    // Line chart: QS = electric cyan, BL = gold, YR = vivid violet
     private static final Color LINE_QS = new Color(0,   200, 255);
     private static final Color LINE_BL = new Color(255, 200,  40);
+    private static final Color LINE_YR = new Color(200, 100, 255);
 
     // ── Data structures ───────────────────────────────────────────────────────
     record DataPoint(int size, String config, String algo, long timeNs) {}
@@ -69,10 +80,12 @@ public class BenchmarkChartGenerator {
         List<DataPoint> allPoints = new ArrayList<>();
         File dir = new File(DATA_DIR);
         File[] files = dir.listFiles((d, name) ->
-            name.matches("cam.run.quickselect.*\\.txt") ||
-            name.matches("cam.run.baseline.*\\.txt")    ||
-            name.matches("cam_run_quickselect.*\\.txt") ||
-            name.matches("cam_run_baseline.*\\.txt"));
+            name.matches("cam.run.quickselect.*\\.txt")   ||
+            name.matches("cam.run.baseline.*\\.txt")       ||
+            name.matches("cam.run.yaroslavskiy.*\\.txt")   ||
+            name.matches("cam_run_quickselect.*\\.txt")    ||
+            name.matches("cam_run_baseline.*\\.txt")       ||
+            name.matches("cam_run_yaroslavskiy.*\\.txt"));
 
         if (files == null || files.length == 0) {
             System.err.println("No matching files found in: " + dir.getAbsolutePath());
@@ -98,7 +111,7 @@ public class BenchmarkChartGenerator {
 
         int[]    sizes   = {100, 1000, 5000, 10000, 50000, 100000};
         String[] configs = {"RANDOM", "SORTED", "REVERSE", "DUPLICATES"};
-        String[] algos   = {"Quickselect(Lomuto)", "Baseline(Arrays.sort)"};
+        String[] algos   = {"Quickselect(Lomuto)", "Baseline(Arrays.sort+RunDetection)", "YAROSLAVSKIY(DualPivot)"};  // keep QS first so combo chart still works
 
         // Bar charts — one per dataset size
         for (int size : sizes) {
@@ -122,14 +135,37 @@ public class BenchmarkChartGenerator {
         ImageIO.write(combo, "PNG", comboOut);
         System.out.println("Saved: " + comboOut.getPath());
 
+        // Combo line: Yaroslavskiy — all configs on one chart
+        BufferedImage yaroCombo = renderYaroComboLineChart(avg, sizes, configs);
+        File yaroComboOut = new File(OUTPUT_DIR, "line_all_configs_yaroslavskiy.png");
+        ImageIO.write(yaroCombo, "PNG", yaroComboOut);
+        System.out.println("Saved: " + yaroComboOut.getPath());
+
         System.out.println("\nDone. Charts written to ./" + OUTPUT_DIR + "/");
         showPreview(OUTPUT_DIR);
     }
 
     // ── File parser ───────────────────────────────────────────────────────────
+    /**
+     * Reads all lines from a file, auto-detecting UTF-16 (BOM) vs UTF-8.
+     * PowerShell's > redirect writes UTF-16 LE with BOM; older files are UTF-8.
+     */
+    static List<String> readLines(File f) throws IOException {
+        byte[] head = new byte[2];
+        try (InputStream is = new FileInputStream(f)) {
+            if (is.read(head) == 2
+                    && ((head[0] == (byte) 0xFF && head[1] == (byte) 0xFE)
+                     || (head[0] == (byte) 0xFE && head[1] == (byte) 0xFF))) {
+                // UTF-16 with BOM — StandardCharsets.UTF_16 consumes the BOM
+                return Files.readAllLines(f.toPath(), StandardCharsets.UTF_16);
+            }
+        }
+        return Files.readAllLines(f.toPath(), StandardCharsets.UTF_8);
+    }
+
     static void parseFile(File f, List<DataPoint> out) throws IOException {
         boolean inCsv = false;
-        for (String raw : Files.readAllLines(f.toPath())) {
+        for (String raw : readLines(f)) {
             String line = raw.trim();
             if (line.startsWith("DatasetSize,")) { inCsv = true; continue; }
             if (!inCsv || line.isEmpty()) continue;
@@ -187,14 +223,17 @@ public class BenchmarkChartGenerator {
             int gx = padL + groupGap * (gi + 1) + groupW * gi;
 
             for (int bi = 0; bi < algos.length; bi++) {
-                boolean isQS = bi == 0;
                 double val   = getAvg(avg, size, configs[gi], algos[bi]);
                 int bx  = gx + bi * (barW + barGap);
                 int bh  = (int)(plotH * val / maxVal);
                 int by  = padT + plotH - bh;
 
-                Color base = isQS ? QS_COLORS[gi] : BL_COLORS[gi];
-                Color top  = brighten(base, 1.25f);
+                Color  base;
+                String algoTag;
+                if      (bi == 0) { base = QS_COLORS[gi]; algoTag = "QS"; }
+                else if (bi == 1) { base = BL_COLORS[gi]; algoTag = "BL"; }
+                else              { base = YR_COLORS[gi]; algoTag = "YR"; }
+                Color top = brighten(base, 1.25f);
 
                 if (bh > 0) {
                     GradientPaint gp = new GradientPaint(bx, by, top, bx, by + bh, base);
@@ -208,8 +247,7 @@ public class BenchmarkChartGenerator {
                     g.setStroke(new BasicStroke(1f));
                 }
 
-                // ── "QS" / "BL" tag directly above bar ────────────────────────
-                String algoTag = isQS ? "QS" : "BL";
+                // ── "QS" / "BL" / "YR" tag directly above bar ─────────────────
                 g.setFont(new Font("Monospaced", Font.BOLD, 12));
                 int tagW = g.getFontMetrics().stringWidth(algoTag);
                 int tagX = bx + (barW - tagW) / 2;
@@ -217,7 +255,7 @@ public class BenchmarkChartGenerator {
                 g.setColor(BG);
                 g.drawString(algoTag, tagX + 1, by - 14 + 1);
                 // Tag in vivid colour
-                g.setColor(isQS ? brighten(base, 1.5f) : brighten(base, 1.2f));
+                g.setColor(bi == 0 ? brighten(base, 1.5f) : brighten(base, 1.2f));
                 g.drawString(algoTag, tagX, by - 14);
 
                 // Value label above the tag
@@ -257,7 +295,11 @@ public class BenchmarkChartGenerator {
 
         // "BL =" label
         g.setColor(new Color(210, 225, 255));
-        g.drawString("BL = Baseline(Arrays.sort)", x + 290, y);
+        g.drawString("BL = Baseline(Arrays.sort+RunDetection)", x + 290, y);
+
+        // "YR =" label
+        g.setColor(new Color(200, 100, 255));
+        g.drawString("YR = YAROSLAVSKIY(DualPivot)", x + 660, y);
 
         // Config swatches
         int swY = y + 18;
@@ -265,11 +307,13 @@ public class BenchmarkChartGenerator {
         for (int i = 0; i < configs.length; i++) {
             int lx = x + i * 240;
             g.setColor(QS_COLORS[i]);
-            g.fillRoundRect(lx, swY - 9, 11, 11, 3, 3);
+            g.fillRoundRect(lx,      swY - 9, 11, 11, 3, 3);
             g.setColor(BL_COLORS[i]);
             g.fillRoundRect(lx + 15, swY - 9, 11, 11, 3, 3);
+            g.setColor(YR_COLORS[i]);
+            g.fillRoundRect(lx + 30, swY - 9, 11, 11, 3, 3);
             g.setColor(TEXT_DIM);
-            g.drawString(configs[i], lx + 30, swY);
+            g.drawString(configs[i], lx + 46, swY);
         }
     }
 
@@ -301,8 +345,8 @@ public class BenchmarkChartGenerator {
         drawYGrid(g, padL, padT, plotW, plotH, maxVal, 6);
         drawXGrid(g, padL, padT, plotW, plotH, sizes);
 
-        Color[]  lineColors = {LINE_QS, LINE_BL};
-        String[] shortNames = {"QuickSelect", "Baseline"};
+        Color[]  lineColors = {LINE_QS, LINE_BL, LINE_YR};
+        String[] shortNames = {"QuickSelect", "Baseline", "Yaroslavskiy"};
 
         for (int ai = 0; ai < algos.length; ai++) {
             drawLineWithEndLabel(g, avg, config, algos[ai], sizes,
@@ -310,7 +354,7 @@ public class BenchmarkChartGenerator {
         }
 
         drawSimpleLegend(g, padL, IMG_H - padB + 38, lineColors,
-            new String[]{"QuickSelect(Lomuto)", "Baseline(Arrays.sort)"});
+            new String[]{"QuickSelect(Lomuto)", "Baseline(Arrays.sort+RunDetection)", "YAROSLAVSKIY(DualPivot)"});
 
         g.setColor(TEXT_DIM);
         g.setFont(new Font("Monospaced", Font.PLAIN, 12));
@@ -355,6 +399,49 @@ public class BenchmarkChartGenerator {
         }
 
         drawSimpleLegend(g, padL, IMG_H - padB + 38, QS_COLORS, configs);
+
+        g.setColor(TEXT_DIM);
+        g.setFont(new Font("Monospaced", Font.PLAIN, 12));
+        drawVerticalString(g, "Time (nanoseconds)", padL - 78, padT + plotH / 2);
+        drawCenteredString(g, "Dataset Size (n)", padL + plotW / 2, IMG_H - 8);
+
+        g.dispose();
+        return img;
+    }
+
+    // ── Combo Line Chart (Yaroslavskiy, all configs) ──────────────────────────
+    static BufferedImage renderYaroComboLineChart(Map<String, Double> avg,
+                                                   int[] sizes,
+                                                   String[] configs) {
+        BufferedImage img = new BufferedImage(IMG_W, IMG_H, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = setupGraphics(img);
+
+        int padL = 100, padR = 160, padT = 75, padB = 90;
+        int plotW = IMG_W - padL - padR;
+        int plotH = IMG_H - padT - padB;
+
+        String alg = "YAROSLAVSKIY(DualPivot)";
+        double maxVal = 1;
+        for (String cfg : configs)
+            for (int s : sizes)
+                maxVal = Math.max(maxVal, getAvg(avg, s, cfg, alg));
+        maxVal *= 1.15;
+
+        g.setColor(TEXT_MAIN);
+        g.setFont(new Font("Monospaced", Font.BOLD, 18));
+        drawCenteredString(g, "YAROSLAVSKIY(DualPivot)  —  All Configurations vs. Dataset Size",
+            padL + plotW / 2, padT - 32);
+
+        drawAxes(g, padL, padT, plotW, plotH);
+        drawYGrid(g, padL, padT, plotW, plotH, maxVal, 6);
+        drawXGrid(g, padL, padT, plotW, plotH, sizes);
+
+        for (int ci = 0; ci < configs.length; ci++) {
+            drawLineWithEndLabel(g, avg, configs[ci], alg, sizes,
+                padL, padT, plotW, plotH, maxVal, YR_COLORS[ci], configs[ci]);
+        }
+
+        drawSimpleLegend(g, padL, IMG_H - padB + 38, YR_COLORS, configs);
 
         g.setColor(TEXT_DIM);
         g.setFont(new Font("Monospaced", Font.PLAIN, 12));
